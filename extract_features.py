@@ -224,9 +224,6 @@ if __name__ == '__main__':
     np.save (args.output_dir + "train_features.npy", np.asarray(train_features.cpu()))
     np.save (args.output_dir + "test_features.npy", np.asarray(query_features.cpu()))
     
-    
-    
-    
     #if utils.get_rank() == 0:  # only rank 0 will work from now on
         ## normalize features
         #train_features = nn.functional.normalize(train_features, dim=1, p=2)

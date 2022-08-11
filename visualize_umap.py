@@ -176,4 +176,3 @@ if __name__ == "__main__":
     plt.clf(); plt.close("all"); 
     
     logger.info("Figure saved as: " + str(args.out_image) + "\n===================\n")
-
