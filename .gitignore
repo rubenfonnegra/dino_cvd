@@ -9,3 +9,6 @@ Results/small_cvd
 Results/exec.sh
 Features/small_cvd_s/test_features.npy
 Features/small_cvd_s/train_features.npy
+Results/sm_cvd_1/checkpoint.pth
+Results/sm_cvd_1/checkpoint0000.pth
+Results/sm_cvd_1/log.txt

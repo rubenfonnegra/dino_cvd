@@ -29,59 +29,46 @@ import pandas as pd
 
 import utils
 import vision_transformer as vits
-from eval_knn import extract_features
 
 
-class OxfordParisDataset(torch.utils.data.Dataset):
-    def __init__(self, dir_main, dataset, split, transform=None, imsize=None):
-        if dataset not in ['roxford5k', 'rparis6k']:
-            raise ValueError('Unknown dataset: {}!'.format(dataset))
-
-        # loading imlist, qimlist, and gnd, in cfg as a dict
-        gnd_fname = os.path.join(dir_main, dataset, 'gnd_{}.pkl'.format(dataset))
-        with open(gnd_fname, 'rb') as f:
-            cfg = pickle.load(f)
-        cfg['gnd_fname'] = gnd_fname
-        cfg['ext'] = '.jpg'
-        cfg['qext'] = '.jpg'
-        cfg['dir_data'] = os.path.join(dir_main, dataset)
-        cfg['dir_images'] = os.path.join(cfg['dir_data'], 'jpg')
-        cfg['n'] = len(cfg['imlist'])
-        cfg['nq'] = len(cfg['qimlist'])
-        cfg['im_fname'] = config_imname
-        cfg['qim_fname'] = config_qimname
-        cfg['dataset'] = dataset
-        self.cfg = cfg
-
-        self.samples = cfg["qimlist"] if split == "query" else cfg["imlist"]
-        self.transform = transform
-        self.imsize = imsize
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, index):
-        path = os.path.join(self.cfg["dir_images"], self.samples[index] + ".jpg")
-        ImageFile.LOAD_TRUNCATED_IMAGES = True
-        with open(path, 'rb') as f:
-            img = Image.open(f)
-            img = img.convert('RGB')
-        if self.imsize is not None:
-            img.thumbnail((self.imsize, self.imsize), Image.ANTIALIAS)
-        if self.transform is not None:
-            img = self.transform(img)
-        return img, index
+def extract_dino_features(model, data_loader, use_cuda=True, multiscale=False, return_csv=False, save_path = "Features/"):
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    features = []
+    i = 0; all_samples = []; all_labels = []; 
+    for samples, index in metric_logger.log_every(data_loader, 10):
+        if use_cuda: 
+            samples = samples.cuda(non_blocking=True)
+            index = index.cuda(non_blocking=True)
+        
+        #-----
+        sample_fname, sample_class = data_loader.dataset.samples[i]; i += 1
+        pos_fname = str.rfind(sample_fname, "/")
+        sample_fname = sample_fname[pos_fname+1:] 
+        all_samples.append(sample_fname)
+        all_labels.append(sample_class)
+        #print (sample_fname) #csv_name
+        #-----
+        
+        if multiscale:
+            feats = utils.multi_scale(samples, model)
+        else:
+            feats = model(samples).clone()
+        
+        if not features:
+            print(f"Storing features into tensor of shape [{len(data_loader.dataset)}, {feats.shape[-1]}]")
+        
+        if use_cuda: 
+            features.extend(feats.cpu().detach().numpy().reshape([1,-1]))
+        else: 
+            features.expand(feats.detach().numpy())
+        
+    if return_csv == True: 
+        return np.array(features), all_samples, all_labels
+    else:
+        return np.array(features)
 
 
-def config_imname(cfg, i):
-    return os.path.join(cfg['dir_images'], cfg['imlist'][i] + cfg['ext'])
-
-
-def config_qimname(cfg, i):
-    return os.path.join(cfg['dir_images'], cfg['qimlist'][i] + cfg['qext'])
-
-
-if __name__ == '__main__':
+def main(): 
     parser = argparse.ArgumentParser('Image Retrieval on revisited Paris and Oxford')
     parser.add_argument('--data_path', default='/path/to/revisited_paris_oxford/', type=str)
     parser.add_argument('--dataset', default='roxford5k', type=str, choices=['roxford5k', 'rparis6k'])
@@ -89,9 +76,10 @@ if __name__ == '__main__':
     parser.add_argument('--imsize', default=224, type=int, help='Image size')
     parser.add_argument('--pretrained_weights', default='', type=str, help="Path to pretrained weights to evaluate.")
     parser.add_argument('--train_data_path', default='', type=str, help="Path to train samples.")
-    parser.add_argument('--test_data_path', default='', type=str, help="Path to test samples.")
+    parser.add_argument('--test_data_path', default=None, type=str, help="Path to test samples.")
     parser.add_argument('--output_dir', default='', type=str, help="Path to test samples.")
     parser.add_argument('--use_cuda', default=True, type=utils.bool_flag)
+    parser.add_argument('--gpu', default=0, type=int, help='GPU to use')
     parser.add_argument('--arch', default='vit_small', type=str, help='Architecture')
     parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
     parser.add_argument("--checkpoint_key", default="teacher", type=str,
@@ -109,40 +97,22 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     # ============ preparing data ... ============
-    transform = pth_transforms.Compose([
-        pth_transforms.ToTensor(),
-        pth_transforms.Resize(args.imsize, pth_transforms.InterpolationMode.BICUBIC),
-        pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        pth_transforms.Grayscale(1),
-    ])
-    #dataset_train = OxfordParisDataset(args.data_path, args.dataset, split="train", transform=transform, imsize=args.imsize)
-    #dataset_query = OxfordParisDataset(args.data_path, args.dataset, split="query", transform=transform, imsize=args.imsize)
-    
-    ## From the other script
-    ##transform = DataAugmentationDINO(
-        ##args.global_crops_scale,
-        ##args.local_crops_scale,
-        ##args.local_crops_number,
-    ##)
-    ##dataset = datasets.ImageFolder(args.train_data_path, transform=transform)
-    #sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
-    #data_loader = torch.utils.data.DataLoader(
-        #dataset,
-        #sampler=sampler,
-        #batch_size=args.batch_size_per_gpu,
-        #num_workers=args.num_workers,
-        #pin_memory=True,
-        #drop_last=True,
-    #)
-    #print(f"Data loaded: there are {len(dataset)} images.")
+    if args.num_channels == 3: 
+        transform = pth_transforms.Compose([
+            pth_transforms.ToTensor(),
+            pth_transforms.Resize(args.imsize, pth_transforms.InterpolationMode.BICUBIC),
+            pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            #pth_transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5)),
+        ])
+    else: 
+        transform = pth_transforms.Compose([
+            pth_transforms.ToTensor(),
+            pth_transforms.Resize(args.imsize, pth_transforms.InterpolationMode.BICUBIC),
+            pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            pth_transforms.Grayscale(1),
+        ])
     
     dataset_train = datasets.ImageFolder(args.train_data_path, transform=transform)
-    #print ("------ Train dataset -----")
-    #for i, _ in enumerate(dataset_train, 0): 
-        #sample_fname, _ = dataset_train.samples[i]
-        #print (sample_fname)
-        ##if i == 10: break
-    
     sampler = torch.utils.data.DistributedSampler(dataset_train, shuffle=False)
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -153,27 +123,26 @@ if __name__ == '__main__':
         drop_last=False,
     )
     
-    dataset_query = datasets.ImageFolder(args.test_data_path, transform=transform)
-    #print ("------ Test dataset -----")
-    #for i, _ in enumerate(dataset_query, 0): 
-        #sample_fname, _ = dataset_query.samples[i]
-        #print (sample_fname)
-        ##if i == 10: break
+    if args.test_data_path: 
+        dataset_query = datasets.ImageFolder(args.test_data_path, transform=transform)
     
-    #sampler = torch.utils.data.DistributedSampler(dataset_query, shuffle=False)
-    data_loader_query = torch.utils.data.DataLoader(
-        dataset_query,
-        batch_size=1,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        drop_last=False,
-    )
-    print(f"train: {len(dataset_train)} imgs / query: {len(dataset_query)} imgs")
+    if args.test_data_path: 
+        data_loader_query = torch.utils.data.DataLoader(
+            dataset_query,
+            batch_size=1,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            drop_last=False,
+        )
+    
+    print(f"train: {len(dataset_train)} imgs") 
+    if args.test_data_path: 
+        print(f"query: {len(dataset_query)} imgs")
     
     
     # ============ building network ... ============
     if "vit" in args.arch:
-        model = vits.__dict__[args.arch](patch_size=args.patch_size, in_chans=args.num_channels, num_classes=0)
+        model = vits.__dict__[args.arch](patch_size=args.patch_size, num_channels=args.num_channels, num_classes=0)
         print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
     elif "xcit" in args.arch:
         model = torch.hub.load('facebookresearch/xcit:main', args.arch, num_classes=0)
@@ -205,56 +174,38 @@ if __name__ == '__main__':
         print("Warning: We use random weights.")
 
     ############################################################################
-    # Step 1: extract features
-    train_features, train_names = extract_features(model, data_loader_train, args.use_cuda, multiscale=args.multiscale, return_csv = True, save_path = args.output_dir + "train/")
-    query_features, query_names = extract_features(model, data_loader_query, args.use_cuda, multiscale=args.multiscale, return_csv = True, save_path = args.output_dir + "test/")
-    
-    train_features = nn.functional.normalize(train_features, dim=1, p=2)
-    query_features = nn.functional.normalize(query_features, dim=1, p=2)
-    
-    csv_dict = {"namefile": train_names}
-    csv_dict = pd.DataFrame.from_dict(csv_dict)
-    csv_dict.to_csv(args.output_dir + "train_features.csv", index = False)
-    
-    csv_dict = {"namefile": query_names}
-    csv_dict = pd.DataFrame.from_dict(csv_dict)
-    csv_dict.to_csv(args.output_dir + "test_features.csv", index = False)
     
     os.makedirs(args.output_dir, exist_ok = True)
-    np.save (args.output_dir + "train_features.npy", np.asarray(train_features.cpu()))
-    np.save (args.output_dir + "test_features.npy", np.asarray(query_features.cpu()))
     
-    #if utils.get_rank() == 0:  # only rank 0 will work from now on
-        ## normalize features
-        #train_features = nn.functional.normalize(train_features, dim=1, p=2)
+    # Step 1: extract features
+    train_features, train_names, train_labels = extract_dino_features(model, data_loader_train, args.use_cuda, multiscale=args.multiscale, return_csv = True, save_path = args.output_dir + "train/")
+    #train_features = nn.functional.normalize(train_features, dim=1, p=2)
+    
+    csv_dict = {"namefile": train_names, "label": train_labels}
+    csv_dict = pd.DataFrame.from_dict(csv_dict)
+    csv_dict.to_csv(args.output_dir + "train_features.csv", index = False)
+    np.save (args.output_dir + "train_features.npy", train_features)
+    
+    
+    if args.test_data_path: 
+        query_features, query_names, query_labels = extract_dino_features(model, data_loader_query, args.use_cuda, multiscale=args.multiscale, return_csv = True, save_path = args.output_dir + "test/")
         #query_features = nn.functional.normalize(query_features, dim=1, p=2)
+        np.save (args.output_dir + "test_features.npy", query_features)
+        
+        csv_dict = {"namefile": query_names, "label": query_labels}
+        csv_dict = pd.DataFrame.from_dict(csv_dict)
+        csv_dict.to_csv(args.output_dir + "test_features.csv", index = False)
+    
 
-        #############################################################################
-        ## Step 2: similarity
-        #sim = torch.mm(train_features, query_features.T)
-        #ranks = torch.argsort(-sim, dim=0).cpu().numpy()
-
-        #############################################################################
-        ## Step 3: evaluate
-        #gnd = dataset_train.cfg['gnd']
-        ## evaluate ranks
-        #ks = [1, 5, 10]
-        ## search for easy & hard
-        #gnd_t = []
-        #for i in range(len(gnd)):
-            #g = {}
-            #g['ok'] = np.concatenate([gnd[i]['easy'], gnd[i]['hard']])
-            #g['junk'] = np.concatenate([gnd[i]['junk']])
-            #gnd_t.append(g)
-        #mapM, apsM, mprM, prsM = utils.compute_map(ranks, gnd_t, ks)
-        ## search for hard
-        #gnd_t = []
-        #for i in range(len(gnd)):
-            #g = {}
-            #g['ok'] = np.concatenate([gnd[i]['hard']])
-            #g['junk'] = np.concatenate([gnd[i]['junk'], gnd[i]['easy']])
-            #gnd_t.append(g)
-        #mapH, apsH, mprH, prsH = utils.compute_map(ranks, gnd_t, ks)
-        #print('>> {}: mAP M: {}, H: {}'.format(args.dataset, np.around(mapM*100, decimals=2), np.around(mapH*100, decimals=2)))
-        #print('>> {}: mP@k{} M: {}, H: {}'.format(args.dataset, np.array(ks), np.around(mprM*100, decimals=2), np.around(mprH*100, decimals=2)))
-    #dist.barrier()
+if __name__ == '__main__':
+    """
+    param = sys.argv.append
+    param ("--arch"); param("vit_small"); param ("--imsize"); param("256"); 
+    param ("--gpu"); param("5"); param ("--multiscale"); param("0"); 
+    param ("--train_data_path"); param ("Data/he_data/he_7k/"); 
+    #param ("--test_data_path"); param("Data/he_data/CRC-VAL-HE-7K-CONT/"); 
+    param ("--pretrained_weights"); param("/scr/rfonnegr/sources/pretrains/dino/checkpoint.pth") #param("/scr/rfonnegr/sources/pretrains/dino/dino_cells.pth");
+    param ("--output_dir"); param("Features/he_7k_jc/"); 
+    param ("--num-channels"); param("3"); 
+    """
+    main()
