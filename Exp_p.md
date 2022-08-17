@@ -20,17 +20,8 @@ python main_dino.py --arch vit_small \
 
 ```
 
+### Ablations 
 
-## Extract features
-
-```
-python extract_features.py  --arch vit_small --imsize 480 --multiscale 0 \
-                            --train_data_path cvd_data/train/dino/ \
-                            --test_data_path cvd_data/test/dino/ \
-                            --pretrained_weights Results/small_cvd_s/checkpoint0300.pth \
-                            --output_dir Features/small_cvd_s/ --num-channels 1
-
-```
 
 ```
 python main_dino.py --arch vit_small \
@@ -58,4 +49,16 @@ python main_dino.py --arch vit_small \
                     --data_path /home/ruben-kubuntu/Devs/dino_cvd/cvd_data/train/dino/ \
                     --output_dir /home/ruben-kubuntu/Devs/dino_cvd/Results/sm_cvd_3 \
                     --epochs 101 --num-channels 1
+```
+
+
+## Extract features
+
+```
+python extract_features.py  --arch vit_small --imsize 480 --multiscale 0 \
+                            --train_data_path cvd_data/train/dino/ \
+                            --test_data_path cvd_data/test/dino/ \
+                            --pretrained_weights Results/small_cvd_s/checkpoint0300.pth \
+                            --output_dir Features/small_cvd_s/ --num-channels 1
+
 ```

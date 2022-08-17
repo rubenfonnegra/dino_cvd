@@ -89,6 +89,7 @@ def main():
         distributed training; see https://pytorch.org/docs/stable/distributed.html""")
     parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
     parser.add_argument("--num-channels", default=3, type=int, help="""Number of input channels""")
+    parser.add_argument("--port", default='29500', type=str, help="""port for parallelization""")
     args = parser.parse_args()
 
     utils.init_distributed_mode(args)
