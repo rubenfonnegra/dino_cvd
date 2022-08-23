@@ -77,21 +77,21 @@ def create_logger():
 def load_data_npy (args, return_names = False): 
     #args
     
-    if args.subset == "reals": 
-        features = np.load(args.data_path + "real_features.npy")
-        names = pd.read_csv (args.data_path + "real_labeled.csv")
+    if args.subset == "train": 
+        features = np.load(args.data_path + "train_features.npy")
+        names = pd.read_csv (args.data_path + "train_features.csv")
         names = np.asarray(names)
         targets = np.ones([len(features), 1])
-    if args.subset == "fakes": 
-        features = np.load(args.data_path + "fake_features.npy")
-        names = pd.read_csv (args.data_path + "fake_labeled.csv")
+    if args.subset == "test": 
+        features = np.load(args.data_path + "test_features.npy")
+        names = pd.read_csv (args.data_path + "test_features.csv")
         names = np.asarray(names)
         targets = np.zeros([len(features), 1])
     if args.subset == "both": 
-        real_features = np.load(args.data_path + "real_features.npy")
-        fake_features = np.load(args.data_path + "fake_features.npy")
-        real_names = pd.read_csv (args.data_path + "real_labeled.csv")
-        fake_names = pd.read_csv (args.data_path + "fake_labeled.csv")
+        real_features = np.load(args.data_path + "train_features.npy")
+        fake_features = np.load(args.data_path + "test_features.npy")
+        real_names = pd.read_csv (args.data_path + "train_features.csv")
+        fake_names = pd.read_csv (args.data_path + "test_features.csv")
         real_targets = np.ones([len(real_features), 1])
         fake_targets = np.zeros([len(fake_features), 1])
         features = np.concatenate([real_features, fake_features], axis = 0)
@@ -121,8 +121,13 @@ def main():
     time_start = time.time()
     logger.info("Start data loading.... This might take a while.")
     #data_subset = Load_data (args)
-    features, targets, names = load_data_npy (args, return_names = True); #print (data_subset.shape)
-    logger.info("Data with shape " + str(features.shape) + " successfully loaded! \n===================")
+    #features, targets, names = load_data_npy (args, return_names = True); #print (data_subset.shape)
+    args.subset = "train"
+    train_feat, train_targets, train_names = load_data_npy (args, return_names = True)
+    args.subset = "test"
+    test_feat, test_targets, test_names = load_data_npy (args, return_names = True)
+    args.subset = "both"
+    logger.info("Data with shape " + str(train_feat.shape) + ", " + str(test_feat.shape) + " successfully loaded! \n===================")
     
     
     logger.info("Starting UMAP with params: " + "\nThis might take a while....")
@@ -132,13 +137,17 @@ def main():
     #umap = UMAP(n_components = args.n_components, n_neighbors = args.n_neighbors, metric = args.metric, init='spectral', random_state=1)
     umap = UMAP()
     
-    umap_results = umap.fit_transform(features) #_transform
+    #umap_results = umap.fit_transform(features) #_transform
+    umap_train = umap.fit_transform(train_feat) #_transform
+    umap_test = umap.transform(test_feat) #_transform
+
     logger.info("UMAP done! \n===================")
     
     time_start = time.time()
     if args.out_results: 
-        np.save(args.out_results, umap_results)
-    logger.info("Results saved! \n===================")
+        np.save(args.out_results, umap_train)
+        np.save(args.out_results, umap_test)
+        logger.info("Results saved! \n===================")
     
     #df_subset['tsne-2d-one'] = tsne_results[:,0]
     #df_subset['tsne-2d-two'] = tsne_results[:,1]
@@ -146,32 +155,52 @@ def main():
     logger.info("Visualizing.... ")
     time_start = time.time()
     
-    ''' Visualización de espacio incrustado '''
+    ''' Visualización de espacio incrustado 
     noise = np. random. normal(0,args.noise,umap_results.shape[0])
     umap_results[:,0] = umap_results[:,0] + noise
     noise = np. random. normal(0,args.noise,umap_results.shape[0])
-    umap_results[:,1] = umap_results[:,1] + noise 
+    umap_results[:,1] = umap_results[:,1] + noise '''
     
-    df = pd.DataFrame(umap_results, columns = ['umap-one', 'umap-two'])
-    df["target"] = targets
-    df["labels"] = names[:, 1]
+    #df = pd.DataFrame(umap_results, columns = ['umap-one', 'umap-two'])
+    #df["target"] = targets
+    #df["labels"] = names[:, 1]
+    df_train = pd.DataFrame(umap_train, columns = ['umap-one', 'umap-two'])
+    df_train["target"] = train_targets
+    df_train["labels"] = train_names[:, 1]
+
+    df_test = pd.DataFrame(umap_test, columns = ['umap-one', 'umap-two'])
+    df_test["target"] = test_targets
+    df_test["labels"] = test_names[:, 1]
     
+    _, ax = plt.subplots(figsize=(15,15))
+
     if args.mode == "classes":
         #
-        cols = len(np.unique (df["labels"]))
+        cols = len(np.unique (df_train["labels"]))
         
         #umap_plot.points(umap_results, labels=np.squeeze(names[:, 1]))
         #"""
-        plt.figure(figsize=(15,15))
-        #plt.figure(figsize=(8, 8))
         sns.scatterplot(
             x="umap-one", y="umap-two",
             hue="labels",
             #size="target",
             palette=sns.color_palette("hls", n_colors = cols),
-            data=df,
+            data=df_train,
             legend="full", 
-            alpha=1
+            alpha=0.1,
+            ax = ax
+        )
+
+        cols = len(np.unique (df_test["labels"]))
+        sns.scatterplot(
+            x="umap-one", y="umap-two",
+            hue="labels",
+            #size="target",
+            palette=sns.color_palette("hls", n_colors = cols),
+            data=df_test,
+            legend="full", 
+            alpha=0.99,
+            ax = ax
         )
         #"""
     elif args.mode == "type":
